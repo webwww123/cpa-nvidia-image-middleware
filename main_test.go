@@ -93,24 +93,13 @@ func TestKontextGenerationUsesPlaceholderAndURLFormat(t *testing.T) {
 	}
 }
 
-func TestKontextMultipartEdit(t *testing.T) {
+func TestKontextMultipartEditRejectedWithoutUpstreamRetry(t *testing.T) {
 	imageBytes, err := base64.StdEncoding.DecodeString(tinyPNGBase64)
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := newTestService(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/flux.1-kontext-dev" {
-			t.Fatalf("upstream path = %q", r.URL.Path)
-		}
-		var payload map[string]any
-		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-			t.Fatal(err)
-		}
-		image, _ := payload["image"].(string)
-		if !strings.HasPrefix(image, "data:image/png;base64,") {
-			t.Fatalf("edit image was not converted to a data URL")
-		}
-		_, _ = io.WriteString(w, `{"artifacts":[{"base64":"`+tinyPNGBase64+`"}]}`)
+	service := newTestService(t, func(http.ResponseWriter, *http.Request) {
+		t.Fatal("hosted NVIDIA preview does not accept arbitrary edit images; upstream must not be called")
 	})
 
 	var body bytes.Buffer
@@ -129,8 +118,52 @@ func TestKontextMultipartEdit(t *testing.T) {
 	request.Header.Set("Content-Type", writer.FormDataContentType())
 	response := httptest.NewRecorder()
 	service.ServeHTTP(response, request)
-	if response.Code != http.StatusOK {
+	if response.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d body=%s", response.Code, response.Body.String())
+	}
+	var payload openAIErrorEnvelope
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Error.Code != "image_edit_not_supported" {
+		t.Fatalf("error code = %q", payload.Error.Code)
+	}
+}
+
+func TestKleinMultipartEditRejectedWithoutUpstreamRetry(t *testing.T) {
+	imageBytes, err := base64.StdEncoding.DecodeString(tinyPNGBase64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := newTestService(t, func(http.ResponseWriter, *http.Request) {
+		t.Fatal("hosted NVIDIA preview does not accept arbitrary edit images; upstream must not be called")
+	})
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	_ = writer.WriteField("model", "flux.2-klein-4b")
+	_ = writer.WriteField("prompt", "turn it blue")
+	part, err := writer.CreateFormFile("image", "input.png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = part.Write(imageBytes)
+	_ = writer.Close()
+
+	request := httptest.NewRequest(http.MethodPost, "/v1/images/edits", &body)
+	request.Header.Set("Authorization", "Bearer test-key")
+	request.Header.Set("Content-Type", writer.FormDataContentType())
+	response := httptest.NewRecorder()
+	service.ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d body=%s", response.Code, response.Body.String())
+	}
+	var payload openAIErrorEnvelope
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Error.Code != "image_edit_not_supported" {
+		t.Fatalf("error code = %q", payload.Error.Code)
 	}
 }
 

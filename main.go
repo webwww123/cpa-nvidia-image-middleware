@@ -185,9 +185,9 @@ func (s *imageService) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeError(w, status, "unsupported image model", "model_not_supported")
 		return
 	}
-	if strings.HasSuffix(path, "/edits") && model != kontextModel {
+	if strings.HasSuffix(path, "/edits") {
 		status = http.StatusBadRequest
-		writeError(w, status, "image editing requires flux.1-kontext-dev", "model_not_supported")
+		writeError(w, status, "image editing is unavailable on the NVIDIA hosted preview API; use image generation instead", "image_edit_not_supported")
 		return
 	}
 
