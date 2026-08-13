@@ -8,6 +8,8 @@ Type=simple
 DynamicUser=true
 Environment=LISTEN_ADDR=172.17.0.1:18357
 Environment=UPSTREAM_BASE_URL=https://ai.api.nvidia.com/v1/genai/black-forest-labs
+# Set with a root-only systemd drop-in in production. Do not commit credentials.
+# EnvironmentFile=-/root/secrets/cpa-nvidia-image-middleware.env
 Environment=REQUEST_TIMEOUT=75s
 ExecStart=/usr/local/bin/cpa-nvidia-image-middleware
 Restart=always

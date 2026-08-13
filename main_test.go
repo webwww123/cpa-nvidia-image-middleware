@@ -26,6 +26,31 @@ func newTestService(t *testing.T, upstream http.HandlerFunc) *imageService {
 	return service
 }
 
+func TestNewImageServiceWithProxyRejectsInvalidProxy(t *testing.T) {
+	if _, err := newImageServiceWithProxy("https://example.com", "://bad-proxy", 5*time.Second, nil); err == nil {
+		t.Fatal("expected invalid proxy URL error")
+	}
+}
+
+func TestNewImageServiceWithProxyConfiguresTransport(t *testing.T) {
+	service, err := newImageServiceWithProxy("https://example.com", "http://127.0.0.1:18080", 5*time.Second, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	transport, ok := service.client.Transport.(*http.Transport)
+	if !ok || transport.Proxy == nil {
+		t.Fatal("expected upstream proxy transport")
+	}
+	request := httptest.NewRequest(http.MethodGet, "https://ai.api.nvidia.com/v1/test", nil)
+	proxyURL, err := transport.Proxy(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if proxyURL.String() != "http://127.0.0.1:18080" {
+		t.Fatalf("proxy URL = %q", proxyURL.String())
+	}
+}
+
 func TestHealthz(t *testing.T) {
 	service := newTestService(t, func(http.ResponseWriter, *http.Request) {})
 	request := httptest.NewRequest(http.MethodGet, "/healthz", nil)

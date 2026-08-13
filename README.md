@@ -18,3 +18,5 @@ NewAPI -> CPA openai-compatibility image provider -> this service -> NVIDIA
 ```
 
 Default listen address: `172.17.0.1:18357`.
+
+Set `UPSTREAM_PROXY_URL` when NVIDIA requests must use an outbound proxy. Keep proxy credentials in a root-only systemd environment file rather than in this repository.

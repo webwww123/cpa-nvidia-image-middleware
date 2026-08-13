@@ -75,10 +75,11 @@ type openAIError struct {
 func main() {
 	listen := flag.String("listen", envOrDefault("LISTEN_ADDR", defaultListenAddress), "listen address")
 	upstream := flag.String("upstream", envOrDefault("UPSTREAM_BASE_URL", defaultUpstreamBase), "NVIDIA image upstream base URL")
+	proxy := flag.String("proxy", envOrDefault("UPSTREAM_PROXY_URL", ""), "optional proxy URL for NVIDIA upstream requests")
 	timeout := flag.Duration("request-timeout", envDurationOrDefault("REQUEST_TIMEOUT", 75*time.Second), "maximum upstream request duration")
 	flag.Parse()
 
-	service, err := newImageService(*upstream, *timeout, nil)
+	service, err := newImageServiceWithProxy(*upstream, *proxy, *timeout, nil)
 	if err != nil {
 		log.Fatalf("configure service: %v", err)
 	}
@@ -115,16 +116,28 @@ func main() {
 }
 
 func newImageService(upstream string, timeout time.Duration, client *http.Client) (*imageService, error) {
+	return newImageServiceWithProxy(upstream, "", timeout, client)
+}
+
+func newImageServiceWithProxy(upstream, proxy string, timeout time.Duration, client *http.Client) (*imageService, error) {
 	parsed, err := url.Parse(strings.TrimRight(strings.TrimSpace(upstream), "/"))
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
 		return nil, fmt.Errorf("invalid upstream base URL")
+	}
+	var proxyFunc func(*http.Request) (*url.URL, error)
+	if strings.TrimSpace(proxy) != "" {
+		parsedProxy, proxyErr := url.Parse(strings.TrimSpace(proxy))
+		if proxyErr != nil || parsedProxy.Scheme == "" || parsedProxy.Host == "" {
+			return nil, fmt.Errorf("invalid upstream proxy URL")
+		}
+		proxyFunc = http.ProxyURL(parsedProxy)
 	}
 	if timeout <= 0 {
 		timeout = 75 * time.Second
 	}
 	if client == nil {
 		client = &http.Client{Transport: &http.Transport{
-			Proxy:                 nil,
+			Proxy:                 proxyFunc,
 			ForceAttemptHTTP2:     true,
 			MaxIdleConns:          100,
 			MaxIdleConnsPerHost:   32,
