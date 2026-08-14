@@ -210,6 +210,39 @@ func TestUpstreamCredentialErrorIsSanitizedAndPreserved(t *testing.T) {
 	}
 }
 
+func TestTrustedNewAPIUpstreamErrorPreservesDiagnosticAndScrubsSecrets(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusPaymentRequired)
+		_, _ = io.WriteString(w, `{"detail":"NVIDIA image account pool-a has no credits at https://billing.internal/status?token=secret-token","provider":"NVIDIA","model":"black-forest-labs/flux.2-klein-4b","api_key":"sk-image-secret123","raw":"Authorization: Bearer secret-token"}`)
+	}))
+	defer server.Close()
+	service, err := newImageServiceWithProxyAndDiagnostics(server.URL, "", 5*time.Second, server.Client(), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/v1/images/generations", strings.NewReader(`{"model":"flux.2-klein-4b","prompt":"a potato"}`))
+	request.Header.Set("Authorization", "Bearer test-key")
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	service.ServeHTTP(response, request)
+
+	if response.Code != http.StatusPaymentRequired {
+		t.Fatalf("status = %d, want 402; body=%s", response.Code, response.Body.String())
+	}
+	body := response.Body.String()
+	for _, want := range []string{"NVIDIA", "pool-a", "no credits", "billing.internal", "black-forest-labs/flux.2-klein-4b"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("trusted diagnostic lost %q: %s", want, body)
+		}
+	}
+	for _, forbidden := range []string{"secret-token", "sk-image-secret123", "Bearer secret-token"} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("trusted diagnostic leaked %q: %s", forbidden, body)
+		}
+	}
+}
+
 func TestRejectsMultipleImagesPerRequest(t *testing.T) {
 	service := newTestService(t, func(http.ResponseWriter, *http.Request) {
 		t.Fatal("upstream should not be called")

@@ -41,9 +41,10 @@ type serviceConfig struct {
 }
 
 type imageService struct {
-	upstreamBase   *url.URL
-	client         *http.Client
-	requestTimeout time.Duration
+	upstreamBase        *url.URL
+	client              *http.Client
+	requestTimeout      time.Duration
+	trustedNewAPIErrors bool
 }
 
 type imageRequest struct {
@@ -77,9 +78,10 @@ func main() {
 	upstream := flag.String("upstream", envOrDefault("UPSTREAM_BASE_URL", defaultUpstreamBase), "NVIDIA image upstream base URL")
 	proxy := flag.String("proxy", envOrDefault("UPSTREAM_PROXY_URL", ""), "optional proxy URL for NVIDIA upstream requests")
 	timeout := flag.Duration("request-timeout", envDurationOrDefault("REQUEST_TIMEOUT", 75*time.Second), "maximum upstream request duration")
+	trustedNewAPIErrors := flag.Bool("trusted-newapi-error-diagnostics", envBoolOrDefault("TRUSTED_NEWAPI_ERROR_DIAGNOSTICS", false), "return secret-scrubbed upstream HTTP diagnostics to a trusted NewAPI hop")
 	flag.Parse()
 
-	service, err := newImageServiceWithProxy(*upstream, *proxy, *timeout, nil)
+	service, err := newImageServiceWithProxyAndDiagnostics(*upstream, *proxy, *timeout, nil, *trustedNewAPIErrors)
 	if err != nil {
 		log.Fatalf("configure service: %v", err)
 	}
@@ -120,6 +122,10 @@ func newImageService(upstream string, timeout time.Duration, client *http.Client
 }
 
 func newImageServiceWithProxy(upstream, proxy string, timeout time.Duration, client *http.Client) (*imageService, error) {
+	return newImageServiceWithProxyAndDiagnostics(upstream, proxy, timeout, client, false)
+}
+
+func newImageServiceWithProxyAndDiagnostics(upstream, proxy string, timeout time.Duration, client *http.Client, trustedNewAPIErrors bool) (*imageService, error) {
 	parsed, err := url.Parse(strings.TrimRight(strings.TrimSpace(upstream), "/"))
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
 		return nil, fmt.Errorf("invalid upstream base URL")
@@ -146,7 +152,7 @@ func newImageServiceWithProxy(upstream, proxy string, timeout time.Duration, cli
 			ResponseHeaderTimeout: timeout,
 		}}
 	}
-	return &imageService{upstreamBase: parsed, client: client, requestTimeout: timeout}, nil
+	return &imageService{upstreamBase: parsed, client: client, requestTimeout: timeout, trustedNewAPIErrors: trustedNewAPIErrors}, nil
 }
 
 func (s *imageService) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -227,6 +233,10 @@ func (s *imageService) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if code < http.StatusOK || code >= http.StatusMultipleChoices {
 		status = publicUpstreamStatus(code)
+		if s.trustedNewAPIErrors {
+			writeTrustedUpstreamError(w, status, upstreamBody)
+			return
+		}
 		message, errorCode := publicUpstreamError(status)
 		writeError(w, status, message, errorCode)
 		return
@@ -636,4 +646,19 @@ func envDurationOrDefault(name string, fallback time.Duration) time.Duration {
 		return fallback
 	}
 	return parsed
+}
+
+func envBoolOrDefault(name string, fallback bool) bool {
+	value := strings.TrimSpace(strings.ToLower(os.Getenv(name)))
+	if value == "" {
+		return fallback
+	}
+	switch value {
+	case "1", "true", "yes", "y", "on":
+		return true
+	case "0", "false", "no", "n", "off":
+		return false
+	default:
+		return fallback
+	}
 }

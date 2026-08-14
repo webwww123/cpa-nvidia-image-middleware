@@ -11,6 +11,7 @@ Environment=UPSTREAM_BASE_URL=https://ai.api.nvidia.com/v1/genai/black-forest-la
 # Set with a root-only systemd drop-in in production. Do not commit credentials.
 # EnvironmentFile=-/root/secrets/cpa-nvidia-image-middleware.env
 Environment=REQUEST_TIMEOUT=75s
+Environment=TRUSTED_NEWAPI_ERROR_DIAGNOSTICS=true
 ExecStart=/usr/local/bin/cpa-nvidia-image-middleware
 Restart=always
 RestartSec=2s
